@@ -106,6 +106,7 @@ Create table Reply (
 	ID int primary key not null,
     Content text not null,
     Reply_date date not null,
+    Reply_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     Thread_ID int not null,
     foreign key(Thread_ID) references Thread(ID)
 );
@@ -119,15 +120,16 @@ Create table Post (
     foreign key(Thread_ID) references Thread(ID)
 ); 
 
-Create table Replies (
-	ID int primary key not null,
-    Content text not null,
-    Reply_date date not null,
-    Thread_ID int not null,
-    Replied_ID int not null,
-    foreign key(Thread_ID) references Thread(ID),
-    foreign key(Replied_ID) references Reply(ID)
-);  
+CREATE TABLE Replies (
+    ID INT PRIMARY KEY NOT NULL,
+    Content TEXT NOT NULL,
+    Reply_date DATE NOT NULL,
+    Reply_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    Thread_ID INT NOT NULL,
+    Replied_ID INT NOT NULL,
+    FOREIGN KEY (Thread_ID) REFERENCES Thread(ID),
+    FOREIGN KEY (Replied_ID) REFERENCES Reply(ID)
+);
 
 Create table Module (
 	Title varchar(100) not null,
@@ -1194,11 +1196,12 @@ VALUES (25000, "How to setup OPNSense?", "I have been setup OPNSense for firewal
        (25004, "How to import data fast?", "I had an assignment on Database System using My SQL, can anyone have ways to import data faster since I have a lot of tables to deal with, like a script or something like that?");
        
 INSERT INTO Reply
-VALUES (250000, "Answer for setup OPNSense", "2023-02-01", 25000),
-       (250001, "Answer for web-block", "2023-05-12", 25001),
-       (250002, "Answer for building a deep learning model", "2023-12-23", 25002),
-       (250003, "Answer for componemt", "2023-11-14", 25003),
-       (250004, "Answer for data importation", "2023-09-19", 25004);
+VALUES 
+    (250000, "Answer for setup OPNSense", "2023-02-01", "2023-02-01 09:00:00", 25000),
+    (250001, "Answer for web-block", "2023-05-12", "2023-05-12 09:01:00", 25001),
+    (250002, "Answer for building a deep learning model", "2023-12-23", "2023-12-23 09:02:00", 25002),
+    (250003, "Answer for componemt", "2023-11-14", "2023-11-14 09:03:00", 25003),
+    (250004, "Answer for data importation", "2023-09-19", "2023-09-19 09:04:00", 25004);
        
 INSERT INTO Post
 VALUES 
@@ -1210,11 +1213,20 @@ VALUES
        
 INSERT INTO Replies
 VALUES 
-    (260000, "Check Network Adaper, check IP, check HTTPS method", "2023-02-03", 25000, 250000),
-	(260001, "Check SSL, check Transparent mode", "2023-05-14", 25001, 250001),
-	(260002, "Learn math like linear algebra, probability and statistic and work on things like convonent layer, functions,... before attending into courses and projects", "2023-12-27", 25002, 250002),
-	(260003, "Group up classes/interfaces that represent the system's work like API, fetch,... and turn them into component - Good Luck, I'm a shitass in this field", "2023-11-15", 25003, 250003),
-	(260004, "If you are dealing with data from csv, excel,...you can use load command rather than insert each row from it", "2023-09-20", 25004, 250004);
+    (260000, "Check Network Adaper, check IP, check HTTPS method", 
+        "2023-02-03", "2023-02-03 09:30:00", 25000, 250000),
+
+    (260001, "Check SSL, check Transparent mode", 
+        "2023-05-14", "2023-05-14 09:31:00", 25001, 250001),
+
+    (260002, "Learn math like linear algebra, probability and statistic and work on things like convonent layer, functions,... before attending into courses and projects", 
+        "2023-12-27", "2023-12-27 09:32:00", 25002, 250002),
+
+    (260003, "Group up classes/interfaces that represent the system's work like API, fetch,... and turn them into component - Good Luck, I'm a shitass in this field", 
+        "2023-11-15", "2023-11-15 09:33:00", 25003, 250003),
+
+    (260004, "If you are dealing with data from csv, excel,...you can use load command rather than insert each row from it", 
+        "2023-09-20", "2023-09-20 09:34:00", 25004, 250004);
     
 INSERT INTO Module
 VALUES 
