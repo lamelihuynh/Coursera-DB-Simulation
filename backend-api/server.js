@@ -308,10 +308,10 @@ app.get('/api/courses/:id', (req, res) => {
       error: 'Course ID not valid' 
     });
   }
+  
+  const sql = 'CALL mydb.sp_ViewCourse(?,?);'
 
-  const sql = 'CALL sp_ViewCourse(?,?);'
-
-  db.query(sql, [courseId], (err, results) => {
+  db.query(sql, [authenticateTeacherId, courseId], (err, results) => {
     if (err) {
       console.error("[ERROR BACKEND] Error Get Course Details:", err.message);
       return res.status(500).json({ 
@@ -320,14 +320,14 @@ app.get('/api/courses/:id', (req, res) => {
       });
     }
 
-    if (results.length === 0) {
+    if (results[0].length === 0) {
       return res.status(404).json({
         success: false,
         message: "Course not found."
       });
     }
 
-    const course = results[0];
+    const course = results[0][0];
 
     return res.status(200).json({
       success: true,
