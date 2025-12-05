@@ -4,7 +4,7 @@ const path = require('path');
 
 const SQL_FOLDER = path.join(__dirname, 'SQL-QUERY');
 const DB_USER = 'root';
-const DB_PASSWORD = 'password_of_u';
+const DB_PASSWORD = 'nhatlinhnehehe';
 const DB_NAME = 'mydb';
 const DB_HOST = 'localhost';
 
