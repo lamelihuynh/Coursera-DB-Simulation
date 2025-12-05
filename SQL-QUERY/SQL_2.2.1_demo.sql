@@ -1,6 +1,7 @@
------------------------------------------
+-- Active: 1764906751390@@127.0.0.1@3306@mydb
+
 -- 1. Teacher (User + Teacher)
------------------------------------------
+
 INSERT INTO Users (
     ID, Username, User_Password, Email, Phone,
     First_Name, Last_Name, Sex, Create_Dated

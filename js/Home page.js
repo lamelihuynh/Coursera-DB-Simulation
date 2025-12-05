@@ -137,13 +137,18 @@ class CourseTable {
         });
     }
 
-    static createCourseNode({ id, title, teacher_name, partner_name = "", price }) {
+    static createCourseNode({ id, title, teacher_name, partner_name = "", price, is_discarded = false }) {
         const a = document.createElement("a");
         a.className = "course-link";
         a.href = `Course.html?id=${encodeURIComponent(id)}`;
 
         const item = document.createElement("div");
         item.className = "item";
+        
+        // If course is discarded, apply opacity
+        if (is_discarded) {
+            item.style.opacity = "0.6";
+        }
 
         const img = document.createElement("img");
         img.src = CourseBackground.next();
@@ -214,15 +219,27 @@ class CourseTable {
             const data = await res.json();
             const list = data && data.data ? data.data : [];
             
+            // Filter courses: show discarded only if teacher ID matches
+            const filteredList = list.filter(item => {
+                // If course is not discarded, always show it
+                if (item.Course_Status !== 'Discarded') {
+                    return true;
+                }
+                // If discarded, only show if teacher ID matches
+                return item.Teacher_ID === Number(teacherId);
+            });
+            
             // Insert items before the add button (if it exists)
             const addButton = container.querySelector("#add-course");
-            for (const item of list) {
+            for (const item of filteredList) {
+                const is_discarded = item.Course_Status === 'Discarded';
                 const courseNode = this.createCourseNode({ 
                     id: item.ID, 
                     title: item.Title, 
                     teacher_name: item.Teacher_Name, 
                     partner_name: item.Partner_Name || "", 
-                    price: item.Price 
+                    price: item.Price,
+                    is_discarded: is_discarded
                 });
                 if (addButton) {
                     container.insertBefore(courseNode, addButton);
@@ -246,11 +263,12 @@ class Filter {
         });
     }
 
-    static async loadFilteredCourses() {
+    static getFilterParams() {
         const filterForm = document.querySelector(".filter-form");
-        if (!filterForm) return;
-
         const params = new URLSearchParams();
+        
+        if (!filterForm) return params;
+
         const minPrice = filterForm.querySelector('input[name="from"]')?.value ?? "";
         const maxPrice = filterForm.querySelector('input[name="to"]')?.value ?? "";
         const language = filterForm.querySelector('select[name="language"]')?.value ?? "";
@@ -265,6 +283,17 @@ class Filter {
         if (teacher_id) params.set("teacherId", teacher_id);
         if (specialization) params.set("specialization", specialization);
 
+        return params;
+    }
+
+    static async loadFilteredCourses() {
+        const params = this.getFilterParams();
+        // Also include search keyword if present
+        const searchInput = document.querySelector('.input-box');
+        const kw = searchInput?.value?.trim() ?? "";
+        if (kw) {
+            params.set('keyword', kw);
+        }
         const url = `http://localhost:3000/api/courses/search?${params.toString()}`;
         await CourseTable.loadCourses(url);
     }
@@ -297,13 +326,12 @@ class MainPage {
         const searchButton = document.querySelector('.search-button');
         const doSearch = async () => {
             const kw = searchInput?.value?.trim() ?? "";
-            if (!kw) {
-                // Empty search -> load default list
-                await CourseTable.loadCourses();
-                return;
+            const params = Filter.getFilterParams();
+            
+            if (kw) {
+                params.set('keyword', kw);
             }
-            const params = new URLSearchParams();
-            params.set('keyword', kw);
+            
             const url = `http://localhost:3000/api/courses/search?${params.toString()}`;
             await CourseTable.loadCourses(url);
         };
