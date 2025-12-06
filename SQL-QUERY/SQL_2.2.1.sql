@@ -74,3 +74,34 @@ BEGIN
 END$$
 
 DELIMITER ;
+
+DELIMITER $$
+
+CREATE TRIGGER trg_reply_check_parent_update
+BEFORE UPDATE ON Reply
+FOR EACH ROW
+BEGIN
+    DECLARE v_count_violate INT DEFAULT 0;
+
+    -- Chỉ kiểm tra khi ngày hoặc thời gian của parent thay đổi
+    IF NEW.Reply_date <> OLD.Reply_date
+       OR NEW.Reply_time <> OLD.Reply_time THEN
+
+        SELECT COUNT(*) INTO v_count_violate
+        FROM Replies
+        WHERE Replied_ID = OLD.ID
+          AND (
+                -- child date earlier than new parent date
+                Reply_date < NEW.Reply_date
+                -- or same date but child time earlier than new parent time
+                OR (Reply_date = NEW.Reply_date AND Reply_time < NEW.Reply_time)
+              );
+
+        IF v_count_violate > 0 THEN
+            SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Replies cannot occur earlier than their parent reply.';
+        END IF;
+    END IF;
+END$$
+
+DELIMITER ;
