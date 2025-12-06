@@ -1,142 +1,115 @@
--- Active: 1764906751390@@127.0.0.1@3306@mydb
+-- ============================
+-- 1. THREAD MẪU (HỢP LỆ)
+-- ============================
 
--- 1. Teacher (User + Teacher)
-
-INSERT INTO Users (
-    ID, Username, User_Password, Email, Phone,
-    First_Name, Last_Name, Sex, Create_Dated
-) VALUES
-(10001, 'teacher1', 'pw', 'teacher1@test.com', '0123',
- 'T', 'One', 'M', '2024-01-01');
-
-INSERT INTO Teacher (ID, Title)
-VALUES (10001, 'Professor');
-
------------------------------------------
--- 2. Student (User + Student)
------------------------------------------
-INSERT INTO Users (
-    ID, Username, User_Password, Email, Phone,
-    First_Name, Last_Name, Sex, Create_Dated
-) VALUES
-(20001, 'student1', 'pw', 'student1@test.com', '0456',
- 'S', 'One', 'F', '2024-01-02');
-
-INSERT INTO Student (
-    ID, Date_of_birth, Number_course_enrolled, Number_course_completed
-) VALUES
-(20001, '2004-01-01', 0, 0);
-
------------------------------------------
--- 3. Course + Module
------------------------------------------
-INSERT INTO Course (
-    ID, Title, Course_Language, Course_Description,
-    Price, Course_Level, Duration,
-    Teacher_ID, Delete_Date, Delete_By, Course_Status
-) VALUES
-(30001, 'Quiz Test Course', 'English', 'Course for testing quiz attempts',
- 'Free', 'Beginner', '1h',
- 10001, NULL, NULL, 'Available');
-
-INSERT INTO Module (Title, Course_ID, Duration)
-VALUES ('Quiz Module', 30001, '30m');
-
------------------------------------------
--- 4. Learning_Item:
---   - 1 QUIZ (ID=40001)
---   - 1 VIDEO (ID=40002) để test non-quiz
------------------------------------------
-INSERT INTO Learning_Item (
-    ID, Module_Title, Course_ID, Item_Order, Content_Type, Title
-) VALUES
-(40001, 'Quiz Module', 30001, 1, 'QUIZ',  'Quiz 1'),
-(40002, 'Quiz Module', 30001, 2, 'VIDEO', 'Video 1');
-
------------------------------------------
--- 5. Quiz cho Learning_Item 40001
--- Max_Attempt = 3
------------------------------------------
-INSERT INTO Quiz (
-    ID, Module_Title, Course_ID,
-    Passing_Score, Time_Limit, Max_Attempt
-) VALUES
-(40001, 'Quiz Module', 30001,
- 5, '00:10:00', 3);
-
------------------------------------------
--- 6. Enrollment cho Student 20001 vào Course 30001
------------------------------------------
-INSERT INTO Enrollment (
-    Enroll_ID, Enroll_date, Complete_Percentage, Student_ID, Course_ID
-) VALUES
-(50001, '2024-02-01', 0, 20001, 30001);
-
--- 3 lần làm Video 40002 → tất cả đều OK
-INSERT INTO Make_Progress (
-    Enroll_ID, Learning_Item_ID, Learning_Item_Module_Title,
-    Learning_Item_Course_ID, Completion_Time, Score, Total_Time_Limit
-) VALUES
-(50001, 40002, 'Quiz Module', 30001, '00:05:00', 0, '00:00:00'),
-(50001, 40002, 'Quiz Module', 30001, '00:06:00', 0, '00:00:00'),
-(50001, 40002, 'Quiz Module', 30001, '00:07:00', 0, '00:00:00');
-
-SELECT *
-FROM Make_Progress
-WHERE Enroll_ID = 50001
-  AND Learning_Item_ID = 40002;
--- Kỳ vọng: 3 dòng, trigger không báo lỗi
-
--- Attempt 1: OK
-INSERT INTO Make_Progress (
-    Enroll_ID, Learning_Item_ID, Learning_Item_Module_Title,
-    Learning_Item_Course_ID, Completion_Time, Score, Total_Time_Limit
-) VALUES
-(50001, 40001, 'Quiz Module', 30001, '00:03:00', 6, '00:10:00');
-
--- Attempt 2: OK
-INSERT INTO Make_Progress (
-    Enroll_ID, Learning_Item_ID, Learning_Item_Module_Title,
-    Learning_Item_Course_ID, Completion_Time, Score, Total_Time_Limit
-) VALUES
-(50001, 40001, 'Quiz Module', 30001, '00:04:00', 7, '00:10:00');
-
--- Attempt 3: OK
-INSERT INTO Make_Progress (
-    Enroll_ID, Learning_Item_ID, Learning_Item_Module_Title,
-    Learning_Item_Course_ID, Completion_Time, Score, Total_Time_Limit
-) VALUES
-(50001, 40001, 'Quiz Module', 30001, '00:05:00', 8, '00:10:00');
-
--- Attempt 4: PHẢI BỊ CHẶN
--- Kỳ vọng: Error 45000 với message
--- 'Đã vượt quá số lần làm bài kiểm tra tối đa.'
-INSERT INTO Make_Progress (
-    Enroll_ID, Learning_Item_ID, Learning_Item_Module_Title,
-    Learning_Item_Course_ID, Completion_Time, Score, Total_Time_Limit
-) VALUES
-(50001, 40001, 'Quiz Module', 30001, '00:06:00', 9, '00:10:00');
+INSERT INTO Thread (ID, Title, Content)
+VALUES 
+    (25005, 'Setup OPNSense', 'Thread about setting up OPNSense'),
+    (25006, 'Web blocking', 'Thread about blocking websites'),
+    (25007, 'Deep learning model', 'Thread about building DL model'),
+    (25008, 'Component design', 'Thread about components'),
+    (25009, 'Data import', 'Thread about importing data');
 
 
--- Tạo Enrollment mới cho cùng Student 20001
-INSERT INTO Enrollment (
-    Enroll_ID, Enroll_date, Complete_Percentage, Student_ID, Course_ID
-) VALUES
-(50002, '2024-02-02', 0, 20001, 30001);
+-- ============================
+-- 2. REPLY GỐC (CHA) – HỢP LỆ
+-- ============================
 
--- Với Enroll_ID = 50002, lại được làm 3 lần từ đầu
+INSERT INTO Reply (ID, Content, Reply_date, Reply_time, Thread_ID)
+VALUES 
+    (250005, 'Answer for setup OPNSense', 
+        '2023-02-01', '2023-02-01 09:00:00', 25005),
 
-INSERT INTO Make_Progress (
-    Enroll_ID, Learning_Item_ID, Learning_Item_Module_Title,
-    Learning_Item_Course_ID, Completion_Time, Score, Total_Time_Limit
-) VALUES
-(50002, 40001, 'Quiz Module', 30001, '00:03:00', 6, '00:10:00'),
-(50002, 40001, 'Quiz Module', 30001, '00:04:00', 7, '00:10:00'),
-(50002, 40001, 'Quiz Module', 30001, '00:05:00', 8, '00:10:00');
+    (250006, 'Answer for web-block', 
+        '2023-05-12', '2023-05-12 09:01:00', 25006),
 
--- Lần thứ 4 với Enroll_ID=50002 cũng phải bị chặn
-INSERT INTO Make_Progress (
-    Enroll_ID, Learning_Item_ID, Learning_Item_Module_Title,
-    Learning_Item_Course_ID, Completion_Time, Score, Total_Time_Limit
-) VALUES
-(50002, 40001, 'Quiz Module', 30001, '00:06:00', 9, '00:10:00');
+    (250007, 'Answer for building a deep learning model', 
+        '2023-12-23', '2023-12-23 09:02:00', 25007),
+
+    (250008, 'Answer for component', 
+        '2023-11-14', '2023-11-14 09:03:00', 25008),
+
+    (250009, 'Answer for data importation', 
+        '2023-09-19', '2023-09-19 09:04:00', 25009);
+
+
+-- ============================
+-- 3. REPLIES (CON) – HỢP LỆ
+-- ============================
+
+INSERT INTO Replies (ID, Content, Reply_date, Reply_time, Thread_ID, Replied_ID)
+VALUES 
+    (260005, 'Check Network Adapter, check IP, check HTTPS method', 
+        '2023-02-03', '2023-02-03 09:30:00', 25005, 250005),
+
+    (260006, 'Check SSL, check Transparent mode', 
+        '2023-05-14', '2023-05-14 09:31:00', 25006, 250006),
+
+    (260007, 'Learn math (linear algebra, probability, statistic)...', 
+        '2023-12-27', '2023-12-27 09:32:00', 25007, 250007),
+
+    (260008, 'Group classes/interfaces (API, fetch, ...) into components', 
+        '2023-11-15', '2023-11-15 09:33:00', 25008, 250008),
+
+    (260009, 'For CSV/Excel, use bulk load commands...', 
+        '2023-09-20', '2023-09-20 09:34:00', 25009, 250009);
+
+
+
+-- =====================================================================
+-- ❌ TESTCASE VI PHẠM TRIGGER (PHẢI BỊ CHẶN)
+-- =====================================================================
+
+
+-- 1) CHILD DATE < PARENT DATE
+INSERT INTO Replies (ID, Content, Reply_date, Reply_time, Thread_ID, Replied_ID)
+VALUES 
+    (260015, 'INVALID: child date < parent date', 
+        '2023-01-30', '2023-01-30 10:00:00', 25005, 250005);
+-- EXPECT ERROR
+
+
+-- 2) SAME DATE BUT EARLIER TIME
+INSERT INTO Replies (ID, Content, Reply_date, Reply_time, Thread_ID, Replied_ID)
+VALUES 
+    (260016, 'INVALID: same date but earlier time', 
+        '2023-05-12', '2023-05-12 09:00:00', 25006, 250006);
+-- EXPECT ERROR
+
+
+-- 3) INSERT HỢP LỆ → UPDATE THÀNH VI PHẠM
+
+-- 3.1 – INSERT HỢP LỆ
+INSERT INTO Replies (ID, Content, Reply_date, Reply_time, Thread_ID, Replied_ID)
+VALUES 
+    (260017, 'Valid child first, then we break it by UPDATE', 
+        '2023-05-13', '2023-05-13 10:00:00', 25006, 250006);
+-- EXPECT OK
+
+-- 3.2 – UPDATE VI PHẠM (TIME < PARENT)
+UPDATE Replies
+SET Reply_date = '2023-05-12',
+    Reply_time = '2023-05-12 08:00:00'
+WHERE ID = 260017;
+-- EXPECT ERROR
+
+
+
+-- =====================================================================
+-- 🟦 TESTCASE UPDATE REPLY (CHA)
+-- =====================================================================
+
+-- ✔ HỢP LỆ (cha vẫn trước con)
+UPDATE Reply
+SET Reply_date = '2023-02-02',
+    Reply_time = '2023-02-02 10:00:00'
+WHERE ID = 250005;
+-- EXPECT OK
+
+
+-- ❌ VI PHẠM (cha trễ hơn con)
+UPDATE Reply
+SET Reply_date = '2023-11-16',
+    Reply_time = '2023-11-16 08:00:00'
+WHERE ID = 250008;
+-- EXPECT ERROR
