@@ -28,10 +28,11 @@ INSERT INTO Course (
     Course_Level, Duration, Teacher_ID,
     Delete_Date, Delete_By, Course_Status
 ) VALUES
+
 -- C1: Web Backend
 (300011,
- 'Web Programming with Node.js',
  'Software Engineering',
+ 'Web Programming',
  'English',
  'Introduction to building backend REST APIs with Node.js, Express and basic deployment.',
  '49 USD',
@@ -42,8 +43,9 @@ INSERT INTO Course (
 
 -- C2: Database Systems
 (300012,
- 'CO2013 - Database Systems',
  'Software Engineering',
+ 'Database Systems',
+ 'English',
  'Core concepts of relational databases, SQL, normalization and transaction processing.',
  '65 USD',
  'Intermediate',
@@ -51,10 +53,11 @@ INSERT INTO Course (
  2310038,
  NULL, NULL, 'Available'),
 
--- C3: Machine Learning căn bản
+-- C3: Machine Learning Fundamentals
 (300013,
- 'Machine Learning Fundamentals',
  'Data Science & AI',
+ 'Machine Learning Fundamentals',
+ 'English',
  'Supervised learning, regularization, model evaluation and basic ML workflows.',
  '79 USD',
  'Intermediate',
@@ -64,8 +67,9 @@ INSERT INTO Course (
 
 -- C4: Operating Systems & Linux
 (300014,
- 'Operating Systems with Linux',
  'Software Engineering',
+ 'Operating Systems',
+ 'English',
  'Processes, threads, scheduling, memory management and intro to Linux commands.',
  '59 USD',
  'Advanced',
@@ -75,8 +79,8 @@ INSERT INTO Course (
 
 -- C5: Network Fundamentals
 (300015,
- 'Network Fundamentals (Cisco-style)',
  'Network Computing',
+ 'Network Fundamentals',
  'English',
  'TCP/IP, switching, routing basics, subnetting and small campus network design.',
  '99 USD',
@@ -87,8 +91,9 @@ INSERT INTO Course (
 
 -- C6: Software Technology
 (300016,
- 'Software Technology',
  'Software Engineering',
+ 'Software Technology',
+ 'English',
  'Term-long project to design, implement and demo a Tutor Support System for HCMUT.',
  'Free',
  'Advanced',
