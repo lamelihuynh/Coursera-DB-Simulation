@@ -24,13 +24,14 @@ INSERT INTO Teacher (ID, Title) VALUES
 -- =========================
 
 INSERT INTO Course (
-    ID, Title, Course_Language, Course_Description, Price,
+    ID, Specialization, Title, Course_Language, Course_Description, Price,
     Course_Level, Duration, Teacher_ID,
     Delete_Date, Delete_By, Course_Status
 ) VALUES
 -- C1: Web Backend
 (300011,
  'Web Programming with Node.js',
+ 'Software Engineering',
  'English',
  'Introduction to building backend REST APIs with Node.js, Express and basic deployment.',
  '49 USD',
@@ -42,7 +43,7 @@ INSERT INTO Course (
 -- C2: Database Systems
 (300012,
  'CO2013 - Database Systems',
- 'Vietnamese',
+ 'Software Engineering',
  'Core concepts of relational databases, SQL, normalization and transaction processing.',
  '65 USD',
  'Intermediate',
@@ -53,7 +54,7 @@ INSERT INTO Course (
 -- C3: Machine Learning căn bản
 (300013,
  'Machine Learning Fundamentals',
- 'English',
+ 'Data Science & AI',
  'Supervised learning, regularization, model evaluation and basic ML workflows.',
  '79 USD',
  'Intermediate',
@@ -64,7 +65,7 @@ INSERT INTO Course (
 -- C4: Operating Systems & Linux
 (300014,
  'Operating Systems with Linux',
- 'Vietnamese',
+ 'Software Engineering',
  'Processes, threads, scheduling, memory management and intro to Linux commands.',
  '59 USD',
  'Advanced',
@@ -75,6 +76,7 @@ INSERT INTO Course (
 -- C5: Network Fundamentals
 (300015,
  'Network Fundamentals (Cisco-style)',
+ 'Network Computing',
  'English',
  'TCP/IP, switching, routing basics, subnetting and small campus network design.',
  '99 USD',
@@ -83,10 +85,10 @@ INSERT INTO Course (
  2310041,
  NULL, NULL, 'Available'),
 
--- C6: Software Engineering
+-- C6: Software Technology
 (300016,
- 'Software Engineering Project - Tutor Support System',
- 'Vietnamese',
+ 'Software Technology',
+ 'Software Engineering',
  'Term-long project to design, implement and demo a Tutor Support System for HCMUT.',
  'Free',
  'Advanced',
