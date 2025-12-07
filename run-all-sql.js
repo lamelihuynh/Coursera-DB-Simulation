@@ -5,7 +5,7 @@ const os = require('os');
 
 const SQL_FOLDER = path.join(__dirname, 'SQL-QUERY');
 const DB_USER = process.env.DB_USER || 'root';
-const DB_PASSWORD = process.env.DB_PASSWORD || 'nhatlinhnehehe';
+const DB_PASSWORD = process.env.DB_PASSWORD || '1234';
 const DB_NAME = process.env.DB_NAME || 'mydb';
 const DB_HOST = process.env.DB_HOST || 'localhost';
 

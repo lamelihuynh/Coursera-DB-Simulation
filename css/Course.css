@@ -15,6 +15,7 @@ body{
     padding-top: 30px;
     padding-bottom: 30px;
     padding-left: 10vw;
+    padding-right: 10vw;
 }
 
 .main-info .course-name{
@@ -54,6 +55,12 @@ body{
     background-color: blue;
     color: white;
     cursor: pointer;
+}
+.main-info .description{
+    margin-top: 20px;
+    font-size: 20px;
+    text-align: justify;
+    margin-right: 150px;
 }
 
 .other-info{

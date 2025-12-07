@@ -39,6 +39,7 @@ class Course{
             <p class="action-title">Action:</p>
             ${actionButtons}
         </div>
+        <p class="description">${this.description || 'N/A'}</p>
         `;
 
         const otherInfo=document.getElementById('other-info');
@@ -92,29 +93,26 @@ class Course{
     
     static async get(id){
         try {
-            const response = await fetch(`http://localhost:3000/api/courses/${encodeURIComponent(id)}`);
+            const response = await fetch(`http://localhost:3000/api/courses/${encodeURIComponent(id)}?authenticate_teacher_ID=${encodeURIComponent(teacherId)}`);
             if (!response.ok) throw new Error(`Server responded ${response.status}`);
             const data = await response.json();
-            const list = data.data;
+            const item = data.data;
+            console.log(item);
+            this.id = item.ID;
+            this.title = item.Title;
+            this.specialization = item.Specialization || '';
+            this.description = item.Course_Description || '';
+            this.language = item.Course_Language;
+            this.price = item.Price;
+            this.level = item.Course_Level;
+            this.duration = item.Duration;
+            this.teacher_id = item.Teacher_ID;
+            this.disable_date = item.Delete_Date;
+            this.disable_by = item.Delete_By;
+            this.status = item.Course_Status;
+            this.teacher_name = item.Teacher_Name || '';
+            this.partner_name = '';
             
-            if (list && list.length > 0) {
-                const item = list[0];
-                console.log(item);
-                this.id = item.ID;
-                this.title = item.Title;
-                this.specialization = item.Specialization || '';
-                this.description = item.Course_Description || '';
-                this.language = item.Course_Language;
-                this.price = item.Price;
-                this.level = item.Course_Level;
-                this.duration = item.Duration;
-                this.teacher_id = item.Teacher_ID;
-                this.disable_date = item.Delete_Date;
-                this.disable_by = item.Delete_By;
-                this.status = item.Course_Status;
-                this.teacher_name = item.Teacher_Name || '';
-                this.partner_name = '';
-            }
 
             const revenueRes = await fetch(`http://localhost:3000/api/courses/${encodeURIComponent(id)}/revenue`);
             if (!revenueRes.ok) throw new Error(`Server responded ${revenueRes.status} for revenue`);

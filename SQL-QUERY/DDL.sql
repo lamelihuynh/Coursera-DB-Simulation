@@ -708,7 +708,7 @@ VALUES
 -- ALTER TABLE Course
 -- MODIFY COLUMN Price varchar(20) not null default "Free";
     
-INSERT INTO Course
+INSERT INTO Course (ID, Specialization, Title, Course_Language, Course_Description, Price, Course_Level, Duration, Teacher_ID, Delete_Date, Delete_By, Course_Status)
 VALUES 
     (300000, "Data Science & AI","Neural Networks and Deep Learning", "English", "In this course, you will study the foundational concept of neural networks and deep learning. By the end, you will be familiar with the significant technological trends driving the rise of deep learning; build, train, and apply fully connected deep neural networks; implement efficient (vectorized) neural networks; identify key parameters in a neural network’s architecture; and apply deep learning to your own applications.", "50 USD", "Beginner", "2 Weeks", 2310001, null, null, "Available"), 
     (300001, "Data Science & AI" , "Improving Deep Neural Networks: Hyperparameter Tuning, Regularization and Optimization", "English", "In this course, you will open the deep learning black box to understand the processes that drive performance and generate good results systematically. By the end, you will learn the best practices to train and develop test sets and analyze bias/variance for building deep learning applications; be able to use standard neural network techniques such as initialization, L2 and dropout regularization, hyperparameter tuning, batch normalization, and gradient checking; implement and apply a variety of optimization algorithms, such as mini-batch gradient descent, Momentum, RMSprop and Adam, and check for their convergence; and implement a neural network in TensorFlow.", "60 USD", "Intermediate", "3 Weeks", 2310011, null, null, "Available"), 
@@ -722,7 +722,7 @@ VALUES
     (300009, "Data Engineering","Introduction to Data Engineering", "English", "Start your journey in one of the fastest growing professions today with this beginner-friendly Data Engineering course! You will be introduced to the core concepts, processes, and tools you need to know in order to get a foundational knowledge of data engineering. as well as the roles that Data Engineers, Data Scientists, and Data Analysts play in the ecosystem. ", "90 USD", "Beginner", "1 Month", 2310010, null, null, "Available"), 
     (300010, "Data Science & AI","Python for Data Science, AI & Development", "English", "As you progress, you will gain practical experience reading from and writing to files and working with common file formats. You’ll also use powerful Python libraries like NumPy and Pandas for data manipulation and analysis. The course also covers APIs and web scraping, teaching you how to interact with REST APIs using libraries like requests and extract data from websites using BeautifulSoup. ", "90 USD", "Intermediate", "3 Weeks", 2310015, null, null, "Available"); 
     
-INSERT INTO Enrollment
+INSERT INTO Enrollment (Enroll_ID, Enroll_date, Complete_Percentage, Student_ID, Course_ID)
 VALUES 
 -- Student 2310016 (Enrolled 10, Completed 8) -> 8 dòng 100%, 2 dòng <100%
     (400000, "2023-01-10", 100, 2310016, 300001),
