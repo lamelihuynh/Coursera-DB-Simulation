@@ -132,7 +132,7 @@ CREATE TABLE Replies (
     Replied_ID INT NOT NULL,
     FOREIGN KEY (Thread_ID) REFERENCES Thread(ID),
     FOREIGN KEY (Replied_ID) REFERENCES Reply(ID)
- );
+);
 
 Create table Module (
 	Title varchar(100) not null,
@@ -1315,7 +1315,7 @@ VALUES
         "2023-11-15", "2023-11-15 09:33:00", 25003, 250003),
 
     (260004, "If you are dealing with data from csv, excel,...you can use load command rather than insert each row from it", 
-         "2023-09-20", "2023-09-20 09:34:00", 25004, 250004);
+        "2023-09-20", "2023-09-20 09:34:00", 25004, 250004);
     
 INSERT INTO Module
 VALUES 
