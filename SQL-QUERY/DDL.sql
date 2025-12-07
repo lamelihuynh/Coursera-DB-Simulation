@@ -73,6 +73,9 @@ Create table Enrollment (
     Complete_Percentage INT default 0 not null,
     Student_ID int not null,
     Course_ID int not null,
+    -- v3 added
+    Access_Level ENUM('Limited', 'Full') DEFAULT 'Limited',
+    -- v3 added
     foreign key(Student_ID) references Student(ID),
     foreign key(Course_ID) references Course(ID)
 );
@@ -106,6 +109,7 @@ Create table Reply (
 	ID int primary key not null,
     Content text not null,
     Reply_date date not null,
+    Reply_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     Thread_ID int not null,
     foreign key(Thread_ID) references Thread(ID)
 );
@@ -119,15 +123,16 @@ Create table Post (
     foreign key(Thread_ID) references Thread(ID)
 ); 
 
-Create table Replies (
-	ID int primary key not null,
-    Content text not null,
-    Reply_date date not null,
-    Thread_ID int not null,
-    Replied_ID int not null,
-    foreign key(Thread_ID) references Thread(ID),
-    foreign key(Replied_ID) references Reply(ID)
-);  
+CREATE TABLE Replies (
+    ID INT PRIMARY KEY NOT NULL,
+    Content TEXT NOT NULL,
+    Reply_date DATE NOT NULL,
+    Reply_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    Thread_ID INT NOT NULL,
+    Replied_ID INT NOT NULL,
+    FOREIGN KEY (Thread_ID) REFERENCES Thread(ID),
+    FOREIGN KEY (Replied_ID) REFERENCES Reply(ID)
+ );
 
 Create table Module (
 	Title varchar(100) not null,
@@ -363,42 +368,6 @@ BEGIN
 END$$
 DELIMITER ;
 
-
-DELIMITER $$
-
-CREATE TRIGGER trg_CheckPartnerCourseCount
-BEFORE DELETE ON Course
-FOR EACH ROW
-BEGIN
-    -- Khai báo biến
-    DECLARE v_partner_id INT;
-    DECLARE v_partner_course_count INT;
-
-    SELECT Partner_ID 
-    INTO v_partner_id
-    FROM Collaborate
-    WHERE Teacher_ID = OLD.Teacher_ID
-    LIMIT 1; 
-    
-    IF v_partner_id IS NOT NULL THEN
-    
-        SELECT COUNT(c.ID)
-        INTO v_partner_course_count
-        FROM Course c
-        JOIN Collaborate col ON c.Teacher_ID = col.Teacher_ID
-        WHERE col.Partner_ID = v_partner_id;
-
-        IF v_partner_course_count <= 1 THEN
-            SIGNAL SQLSTATE '45000'
-            SET MESSAGE_TEXT = 'Không thể xóa: Đây là khóa học cuối cùng của đối tác. Đối tác phải có ít nhất một khóa học.';
-            
-        END IF;
-        
-    END IF;
-END$$
-
-DELIMITER ;
-
 DELIMITER $$
 
 CREATE TRIGGER trg_CheckPaymentDate
@@ -479,6 +448,131 @@ END$$
 
 DELIMITER ;
 -- v2 Ended
+
+-- v3 add
+DELIMITER //
+
+CREATE TRIGGER check_PaymentToCourse
+BEFORE UPDATE ON Payment
+FOR EACH ROW
+BEGIN
+    -- Khai báo biến
+    DECLARE v_course_price_str VARCHAR(20);
+    DECLARE v_course_price_dec DECIMAL(15, 2);
+    DECLARE v_payment_dec DECIMAL(15, 2);
+    
+
+    SELECT c.Price INTO v_course_price_str
+    FROM Course c 
+    JOIN Enrollment e ON e.Course_ID = c.ID
+    WHERE e.Enroll_ID = NEW.Enroll_ID;
+    
+    -- 2. Xử lý giá gốc (Course Price)
+    IF v_course_price_str = 'Free' THEN
+        SET v_course_price_dec = 0;
+    ELSE 
+        SET v_course_price_dec = CAST(SUBSTRING(v_course_price_str, " ", 1) AS DECIMAL(15, 2));
+    END IF;
+    
+    IF NEW.Ammount = 'Free' THEN
+        SET v_payment_dec = 0;
+    ELSE
+        SET v_payment_dec = CAST(SUBSTRING(NEW.Ammount, " ", 1) AS DECIMAL(15, 2));
+    END IF;
+    
+    IF v_payment_dec > v_course_price_dec THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Lỗi dữ liệu: Số tiền thanh toán (Payment) không được lớn hơn giá gốc của khóa học.';
+    END IF;
+END; //
+
+DELIMITER ;
+
+
+DELIMITER //
+
+-- 1. Trigger cập nhật quyền khi CẬP NHẬT thanh toán (Ví dụ: Pending -> Success)
+CREATE TRIGGER trg_UpdateAccessOnPayment_Update
+AFTER UPDATE ON Payment
+FOR EACH ROW
+BEGIN
+    -- Nếu thanh toán chuyển sang trạng thái success
+    IF NEW.Payment_Status = 'Finish' AND OLD.Payment_Status != 'Finish' THEN
+        UPDATE Enrollment
+        SET Access_Level = 'Full'
+        WHERE Enroll_ID = NEW.Enroll_ID;
+    END IF;
+END; //
+
+-- 2. [MỚI] Trigger cập nhật quyền khi TẠO MỚI thanh toán (Ví dụ: Thanh toán ngay lập tức)
+-- Đây là phần sửa lỗi logic cho trường hợp bạn vừa test
+CREATE TRIGGER trg_UpdateAccessOnPayment_Insert
+AFTER INSERT ON Payment
+FOR EACH ROW
+BEGIN
+    -- Nếu thanh toán mới tạo mà đã success ngay
+    IF NEW.Payment_Status = 'Finish' THEN
+        UPDATE Enrollment
+        SET Access_Level = 'Full'
+        WHERE Enroll_ID = NEW.Enroll_ID;
+    END IF;
+END; //
+
+-- 3. Trigger set quyền khi mới đăng ký (xử lý khóa học Free)
+CREATE TRIGGER trg_SetAccessOnEnroll
+BEFORE INSERT ON Enrollment
+FOR EACH ROW
+BEGIN
+    DECLARE v_price VARCHAR(20);
+    
+    -- Lấy giá khóa học
+    SELECT Price INTO v_price FROM Course WHERE ID = NEW.Course_ID;
+    
+    -- Nếu miễn phí -> Cấp quyền Full ngay lập tức
+    IF v_price = 'Free' OR v_price = '0' THEN
+        SET NEW.Access_Level = 'Full';
+    ELSE
+        SET NEW.Access_Level = 'Limited';
+    END IF;
+END; //
+
+-- 4. Trigger chặn truy cập khi học (Make_Progress)
+CREATE TRIGGER trg_CheckAccess_MakeProgress
+BEFORE INSERT ON Make_Progress
+FOR EACH ROW
+BEGIN
+    -- Khai báo biến
+    DECLARE v_content_type VARCHAR(20);
+    DECLARE v_access_level VARCHAR(20); 
+
+    -- Lấy loại nội dung
+    SELECT Content_Type INTO v_content_type
+    FROM Learning_Item
+    WHERE ID = NEW.Learning_Item_ID 
+      AND Module_Title = NEW.Learning_Item_Module_Title 
+      AND Course_ID = NEW.Learning_Item_Course_ID;
+    
+    -- Kiểm tra: Nếu nội dung KHÔNG PHẢI là đọc (Reading) thì mới xét quyền hạn
+    IF (v_content_type != 'Reading') THEN
+    
+        -- Lấy cấp độ truy cập hiện tại trong bảng Enrollment
+        SELECT Access_Level INTO v_access_level 
+        FROM Enrollment 
+        WHERE Enroll_ID = NEW.Enroll_ID;
+
+        -- Nếu quyền hạn là Limited -> Chặn
+        IF v_access_level = 'Limited' THEN
+            SIGNAL SQLSTATE '45000' 
+            SET MESSAGE_TEXT = 'Quyền truy cập bị hạn chế: Vui lòng thanh toán khóa học để xem Video và làm Quiz.';
+        END IF;
+        
+    END IF;
+
+END; //
+
+DELIMITER ;
+
+-- v3 end
 
 INSERT INTO Users
 VALUES 
@@ -639,15 +733,15 @@ VALUES
     (400005, "2023-03-15", 100, 2310016, 300006),
     (400006, "2023-04-01", 100, 2310016, 300007),
     (400007, "2023-04-20", 100, 2310016, 300008),
-    (400008, "2023-05-05", 45,  2310016, 300009),
-    (400009, "2023-05-10", 80,  2310016, 300010),
+    (400008, "2023-05-05", 0,  2310016, 300009),
+    (400009, "2023-05-10", 0,  2310016, 300010),
 
 -- Student 2310017 (Enrolled 5, Completed 2)
     (400010, "2023-06-01", 100, 2310017, 300001),
     (400011, "2023-06-05", 100, 2310017, 300002),
-    (400012, "2023-06-10", 20,  2310017, 300003),
-    (400013, "2023-06-15", 55,  2310017, 300004),
-    (400014, "2023-06-20", 10,  2310017, 300005),
+    (400012, "2023-06-10", 0,  2310017, 300003),
+    (400013, "2023-06-15", 0,  2310017, 300004),
+    (400014, "2023-06-20", 0,  2310017, 300005),
 
 -- Student 2310018 (Enrolled 11, Completed 9)
     (400015, "2023-01-11", 100, 2310018, 300000),
@@ -659,16 +753,16 @@ VALUES
     (400021, "2023-03-17", 100, 2310018, 300006),
     (400022, "2023-03-18", 100, 2310018, 300007),
     (400023, "2023-03-19", 100, 2310018, 300008),
-    (400024, "2023-04-20", 30,  2310018, 300009),
-    (400025, "2023-04-21", 65,  2310018, 300010),
+    (400024, "2023-04-20", 0,  2310018, 300009),
+    (400025, "2023-04-21", 0,  2310018, 300010),
 
 -- Student 2310019 (Enrolled 6, Completed 3)
     (400026, "2023-05-01", 100, 2310019, 300002),
     (400027, "2023-05-02", 100, 2310019, 300004),
     (400028, "2023-05-03", 100, 2310019, 300006),
-    (400029, "2023-05-04", 15,  2310019, 300008),
-    (400030, "2023-05-05", 25,  2310019, 300010),
-    (400031, "2023-05-06", 90,  2310019, 300000),
+    (400029, "2023-05-04", 0,  2310019, 300008),
+    (400030, "2023-05-05", 0,  2310019, 300010),
+    (400031, "2023-05-06", 0,  2310019, 300000),
 
 -- Student 2310020 (Enrolled 11, Completed 11) -> Tất cả đều 100%
     (400032, "2023-01-01", 100, 2310020, 300000),
@@ -685,9 +779,9 @@ VALUES
 
 -- Student 2310021 (Enrolled 4, Completed 1)
     (400043, "2023-07-01", 100, 2310021, 300005),
-    (400044, "2023-07-02", 40,  2310021, 300007),
-    (400045, "2023-07-03", 60,  2310021, 300009),
-    (400046, "2023-07-04", 10,  2310021, 300001),
+    (400044, "2023-07-02", 0,  2310021, 300007),
+    (400045, "2023-07-03", 0,  2310021, 300009),
+    (400046, "2023-07-04", 0,  2310021, 300001),
 
 -- Student 2310022 (Enrolled 9, Completed 5)
     (400047, "2023-02-01", 100, 2310022, 300001),
@@ -695,32 +789,32 @@ VALUES
     (400049, "2023-02-03", 100, 2310022, 300003),
     (400050, "2023-02-04", 100, 2310022, 300004),
     (400051, "2023-02-05", 100, 2310022, 300005),
-    (400052, "2023-03-06", 12,  2310022, 300006),
-    (400053, "2023-03-07", 34,  2310022, 300007),
-    (400054, "2023-03-08", 56,  2310022, 300008),
-    (400055, "2023-03-09", 78,  2310022, 300009),
+    (400052, "2023-03-06", 0,  2310022, 300006),
+    (400053, "2023-03-07", 0,  2310022, 300007),
+    (400054, "2023-03-08", 0,  2310022, 300008),
+    (400055, "2023-03-09", 0,  2310022, 300009),
 
 -- Student 2310023 (Enrolled 11, Completed 1)
     (400056, "2023-01-20", 100, 2310023, 300000),
-    (400057, "2023-01-21", 5,   2310023, 300001),
-    (400058, "2023-01-22", 10,  2310023, 300002),
-    (400059, "2023-01-23", 15,  2310023, 300003),
-    (400060, "2023-01-24", 20,  2310023, 300004),
-    (400061, "2023-02-25", 25,  2310023, 300005),
-    (400062, "2023-02-26", 30,  2310023, 300006),
-    (400063, "2023-02-27", 35,  2310023, 300007),
-    (400064, "2023-03-28", 40,  2310023, 300008),
-    (400065, "2023-03-29", 45,  2310023, 300009),
-    (400066, "2023-03-30", 50,  2310023, 300010),
+    (400057, "2023-01-21", 0,   2310023, 300001),
+    (400058, "2023-01-22", 0,  2310023, 300002),
+    (400059, "2023-01-23", 0,  2310023, 300003),
+    (400060, "2023-01-24", 0,  2310023, 300004),
+    (400061, "2023-02-25", 0,  2310023, 300005),
+    (400062, "2023-02-26", 0,  2310023, 300006),
+    (400063, "2023-02-27", 0,  2310023, 300007),
+    (400064, "2023-03-28", 0,  2310023, 300008),
+    (400065, "2023-03-29", 0,  2310023, 300009),
+    (400066, "2023-03-30", 0,  2310023, 300010),
 
 -- Student 2310024 (Enrolled 7, Completed 4)
     (400067, "2023-04-01", 100, 2310024, 300002),
     (400068, "2023-04-02", 100, 2310024, 300004),
     (400069, "2023-04-03", 100, 2310024, 300006),
     (400070, "2023-04-04", 100, 2310024, 300008),
-    (400071, "2023-04-05", 33,  2310024, 300010),
-    (400072, "2023-04-06", 66,  2310024, 300001),
-    (400073, "2023-04-07", 99,  2310024, 300003),
+    (400071, "2023-04-05", 0,  2310024, 300010),
+    (400072, "2023-04-06", 0,  2310024, 300001),
+    (400073, "2023-04-07", 0,  2310024, 300003),
 
 -- Student 2310025 (Enrolled 10, Completed 6)
     (400074, "2023-05-10", 100, 2310025, 300000),
@@ -729,15 +823,15 @@ VALUES
     (400077, "2023-05-13", 100, 2310025, 300003),
     (400078, "2023-05-14", 100, 2310025, 300004),
     (400079, "2023-05-15", 100, 2310025, 300005),
-    (400080, "2023-06-16", 70,  2310025, 300006),
-    (400081, "2023-06-17", 80,  2310025, 300007),
-    (400082, "2023-06-18", 90,  2310025, 300008),
-    (400083, "2023-06-19", 20,  2310025, 300009),
+    (400080, "2023-06-16", 0,  2310025, 300006),
+    (400081, "2023-06-17", 0,  2310025, 300007),
+    (400082, "2023-06-18", 0,  2310025, 300008),
+    (400083, "2023-06-19", 0,  2310025, 300009),
 
 -- Student 2310026 (Enrolled 3, Completed 0) -> Không có dòng nào 100%
-    (400084, "2023-08-01", 10,  2310026, 300005),
-    (400085, "2023-08-02", 20,  2310026, 300006),
-    (400086, "2023-08-03", 30,  2310026, 300007),
+    (400084, "2023-08-01", 0,  2310026, 300005),
+    (400085, "2023-08-02", 0,  2310026, 300006),
+    (400086, "2023-08-03", 0,  2310026, 300007),
 
 -- Student 2310027 (Enrolled 8, Completed 7)
     (400087, "2023-01-15", 100, 2310027, 300001),
@@ -747,7 +841,7 @@ VALUES
     (400091, "2023-02-19", 100, 2310027, 300005),
     (400092, "2023-02-20", 100, 2310027, 300006),
     (400093, "2023-03-21", 100, 2310027, 300007),
-    (400094, "2023-03-22", 55,  2310027, 300008),
+    (400094, "2023-03-22", 0,  2310027, 300008),
 
 -- Student 2310028 (Enrolled 9, Completed 5)
     (400095, "2023-04-05", 100, 2310028, 300000),
@@ -755,10 +849,10 @@ VALUES
     (400097, "2023-04-07", 100, 2310028, 300004),
     (400098, "2023-04-08", 100, 2310028, 300006),
     (400099, "2023-04-09", 100, 2310028, 300008),
-    (400100, "2023-05-10", 44,  2310028, 300001),
-    (400101, "2023-05-11", 33,  2310028, 300003),
-    (400102, "2023-05-12", 22,  2310028, 300005),
-    (400103, "2023-05-13", 11,  2310028, 300007),
+    (400100, "2023-05-10", 0,  2310028, 300001),
+    (400101, "2023-05-11", 0,  2310028, 300003),
+    (400102, "2023-05-12", 0,  2310028, 300005),
+    (400103, "2023-05-13", 0,  2310028, 300007),
 
 -- Student 2310029 (Enrolled 11, Completed 8)
     (400104, "2023-02-01", 100, 2310029, 300000),
@@ -769,28 +863,28 @@ VALUES
     (400109, "2023-03-06", 100, 2310029, 300005),
     (400110, "2023-04-07", 100, 2310029, 300006),
     (400111, "2023-04-08", 100, 2310029, 300007),
-    (400112, "2023-04-09", 88,  2310029, 300008),
-    (400113, "2023-05-10", 77,  2310029, 300009),
-    (400114, "2023-05-11", 66,  2310029, 300010),
+    (400112, "2023-04-09", 0,  2310029, 300008),
+    (400113, "2023-05-10", 0,  2310029, 300009),
+    (400114, "2023-05-11", 0,  2310029, 300010),
 
 -- Student 2310030 (Enrolled 6, Completed 2)
     (400115, "2023-06-01", 100, 2310030, 300001),
     (400116, "2023-06-02", 100, 2310030, 300003),
-    (400117, "2023-06-03", 25,  2310030, 300005),
-    (400118, "2023-06-04", 35,  2310030, 300007),
-    (400119, "2023-06-05", 45,  2310030, 300009),
-    (400120, "2023-06-06", 55,  2310030, 300000),
+    (400117, "2023-06-03", 0,  2310030, 300005),
+    (400118, "2023-06-04", 0,  2310030, 300007),
+    (400119, "2023-06-05", 0,  2310030, 300009),
+    (400120, "2023-06-06", 0,  2310030, 300000),
 
 -- Student 2310031 (Enrolled 9, Completed 4)
     (400121, "2023-07-10", 100, 2310031, 300002),
     (400122, "2023-07-11", 100, 2310031, 300004),
     (400123, "2023-07-12", 100, 2310031, 300006),
     (400124, "2023-07-13", 100, 2310031, 300008),
-    (400125, "2023-07-14", 12,  2310031, 300010),
-    (400126, "2023-07-15", 15,  2310031, 300001),
-    (400127, "2023-07-16", 18,  2310031, 300003),
-    (400128, "2023-07-17", 21,  2310031, 300005),
-    (400129, "2023-07-18", 24,  2310031, 300007),
+    (400125, "2023-07-14", 0,  2310031, 300010),
+    (400126, "2023-07-15", 0,  2310031, 300001),
+    (400127, "2023-07-16", 0,  2310031, 300003),
+    (400128, "2023-07-17", 0,  2310031, 300005),
+    (400129, "2023-07-18", 0,  2310031, 300007),
 
 -- Student 2310032 (Enrolled 10, Completed 6)
     (400130, "2023-01-20", 100, 2310032, 300000),
@@ -799,17 +893,17 @@ VALUES
     (400133, "2023-02-23", 100, 2310032, 300003),
     (400134, "2023-02-24", 100, 2310032, 300004),
     (400135, "2023-02-25", 100, 2310032, 300005),
-    (400136, "2023-03-26", 80,  2310032, 300006),
-    (400137, "2023-03-27", 70,  2310032, 300007),
-    (400138, "2023-03-28", 60,  2310032, 300008),
-    (400139, "2023-03-29", 50,  2310032, 300009),
+    (400136, "2023-03-26", 0,  2310032, 300006),
+    (400137, "2023-03-27", 0,  2310032, 300007),
+    (400138, "2023-03-28", 0,  2310032, 300008),
+    (400139, "2023-03-29", 0,  2310032, 300009),
 
 -- Student 2310033 (Enrolled 5, Completed 3)
     (400140, "2023-08-01", 100, 2310033, 300005),
     (400141, "2023-08-02", 100, 2310033, 300006),
     (400142, "2023-08-03", 100, 2310033, 300007),
-    (400143, "2023-08-04", 45,  2310033, 300008),
-    (400144, "2023-08-05", 30,  2310033, 300009),
+    (400143, "2023-08-04", 0,  2310033, 300008),
+    (400144, "2023-08-05", 0,  2310033, 300009),
 
 -- Student 2310034 (Enrolled 10, Completed 9)
     (400145, "2023-02-10", 100, 2310034, 300001),
@@ -821,234 +915,231 @@ VALUES
     (400151, "2023-03-16", 100, 2310034, 300007),
     (400152, "2023-04-17", 100, 2310034, 300008),
     (400153, "2023-04-18", 100, 2310034, 300009),
-    (400154, "2023-04-19", 95,  2310034, 300010),
+    (400154, "2023-04-19", 36,  2310034, 300010),
 
 -- Student 2310035 (Enrolled 11, Completed 2)
     (400155, "2023-05-01", 100, 2310035, 300000),
     (400156, "2023-05-02", 100, 2310035, 300002),
-    (400157, "2023-05-03", 10,  2310035, 300004),
-    (400158, "2023-05-04", 20,  2310035, 300006),
-    (400159, "2023-06-05", 30,  2310035, 300008),
-    (400160, "2023-06-06", 40,  2310035, 300010),
-    (400161, "2023-06-07", 50,  2310035, 300001),
-    (400162, "2023-07-08", 60,  2310035, 300003),
-    (400163, "2023-07-09", 70,  2310035, 300005),
-    (400164, "2023-07-10", 80,  2310035, 300007),
-    (400165, "2023-07-11", 90,  2310035, 300009);
+    (400157, "2023-05-03", 0,  2310035, 300004),
+    (400158, "2023-05-04", 0,  2310035, 300006),
+    (400159, "2023-06-05", 0,  2310035, 300008),
+    (400160, "2023-06-06", 0,  2310035, 300010),
+    (400161, "2023-06-07", 0,  2310035, 300001),
+    (400162, "2023-07-08", 0,  2310035, 300003),
+    (400163, "2023-07-09", 0,  2310035, 300005),
+    (400164, "2023-07-10", 0,  2310035, 300007),
+    (400165, "2023-07-11", 0,  2310035, 300009);
     
 -- ALTER TABLE Payment
 -- MODIFY COLUMN Ammount varchar(20) default "Free";
 
--- ALTER TABLE Payment
--- MODIFY COLUMN Method varchar(30) default "Free";
-
 INSERT INTO Payment
-VALUES 
+VALUES 
 -- Sinh viên 2310016 (Courses: 01-10)
-    (500000, "2023-01-11", "Cash", "Finish", "60 USD", 400000),
-    (500001, "2023-01-16", "Transaction", "Finish", "70 USD", 400001),
-    (500002, "2023-02-01", "Cash", "Finish", "70 USD", 400002),
-    (500003, "2023-02-21", "Transaction", "Unfinish", "80 USD", 400003),
-    (500004, "2023-03-12", "Cash", "Finish", "80 USD", 400004),
-    (500005, "2023-03-15", "Transaction", "Finish", "80 USD", 400005),
-    (500006, "2023-04-03", "Cash", "Finish", "75 USD", 400006),
-    (500007, "2023-04-21", "Transaction", "Finish", "80 USD", 400007),
-    (500008, "2023-05-06", "Cash", "Unfinish", "90 USD", 400008),
-    (500009, "2023-05-10", "Transaction", "Finish", "90 USD", 400009),
+    (500000, "2023-01-11", "Cash", "Finish", "60 USD", 400000, "Full"),
+    (500001, "2023-01-16", "Transaction", "Finish", "70 USD", 400001, "Full"),
+    (500002, "2023-02-01", "Cash", "Finish", "70 USD", 400002, "Full"),
+    (500003, "2023-02-21", "Transaction", "Unfinish", "80 USD", 400003, "Limited"),
+    (500004, "2023-03-12", "Cash", "Finish", "80 USD", 400004, "Full"),
+    (500005, "2023-03-15", "Transaction", "Finish", "80 USD", 400005, "Full"),
+    (500006, "2023-04-03", "Cash", "Finish", "75 USD", 400006, "Full"),
+    (500007, "2023-04-21", "Transaction", "Finish", "80 USD", 400007, "Full"),
+    (500008, "2023-05-06", "Cash", "Unfinish", "90 USD", 400008, "Limited"),
+    (500009, "2023-05-10", "Transaction", "Finish", "90 USD", 400009, "Full"),
 
 -- Sinh viên 2310017 (Courses: 01-05)
-    (500010, "2023-06-01", "Transaction", "Finish", "60 USD", 400010),
-    (500011, "2023-06-06", "Cash", "Finish", "70 USD", 400011),
-    (500012, "2023-06-12", "Transaction", "Unfinish", "70 USD", 400012),
-    (500013, "2023-06-16", "Cash", "Finish", "80 USD", 400013),
-    (500014, "2023-06-21", "Transaction", "Unfinish", "80 USD", 400014),
+    (500010, "2023-06-01", "Transaction", "Finish", "60 USD", 400010, "Full"),
+    (500011, "2023-06-06", "Cash", "Finish", "70 USD", 400011, "Full"),
+    (500012, "2023-06-12", "Transaction", "Unfinish", "70 USD", 400012, "Limited"),
+    (500013, "2023-06-16", "Cash", "Finish", "80 USD", 400013, "Full"),
+    (500014, "2023-06-21", "Transaction", "Unfinish", "80 USD", 400014, "Limited"),
 
 -- Sinh viên 2310018 (Courses: 00-10)
-    (500015, "2023-01-12", "Cash", "Finish", "50 USD", 400015),
-    (500016, "2023-01-14", "Transaction", "Finish", "60 USD", 400016),
-    (500017, "2023-01-13", "Cash", "Finish", "70 USD", 400017),
-    (500018, "2023-02-15", "Transaction", "Finish", "70 USD", 400018),
-    (500019, "2023-02-16", "Cash", "Finish", "80 USD", 400019),
-    (500020, "2023-02-18", "Transaction", "Finish", "80 USD", 400020),
-    (500021, "2023-03-19", "Cash", "Finish", "80 USD", 400021),
-    (500022, "2023-03-19", "Transaction", "Finish", "75 USD", 400022),
-    (500023, "2023-03-20", "Cash", "Finish", "80 USD", 400023),
-    (500024, "2023-04-22", "Transaction", "Unfinish", "90 USD", 400024),
-    (500025, "2023-04-22", "Cash", "Finish", "90 USD", 400025),
+    (500015, "2023-01-12", "Cash", "Finish", "50 USD", 400015, "Full"),
+    (500016, "2023-01-14", "Transaction", "Finish", "60 USD", 400016, "Full"),
+    (500017, "2023-01-13", "Cash", "Finish", "70 USD", 400017, "Full"),
+    (500018, "2023-02-15", "Transaction", "Finish", "70 USD", 400018, "Full"),
+    (500019, "2023-02-16", "Cash", "Finish", "80 USD", 400019, "Full"),
+    (500020, "2023-02-18", "Transaction", "Finish", "80 USD", 400020, "Full"),
+    (500021, "2023-03-19", "Cash", "Finish", "80 USD", 400021, "Full"),
+    (500022, "2023-03-19", "Transaction", "Finish", "75 USD", 400022, "Full"),
+    (500023, "2023-03-20", "Cash", "Finish", "80 USD", 400023, "Full"),
+    (500024, "2023-04-22", "Transaction", "Unfinish", "90 USD", 400024, "Limited"),
+    (500025, "2023-04-22", "Cash", "Finish", "90 USD", 400025, "Full"),
 
 -- Sinh viên 2310019 (Courses: 02,04,06,08,10,00)
-    (500026, "2023-05-02", "Transaction", "Finish", "70 USD", 400026),
-    (500027, "2023-05-03", "Cash", "Finish", "80 USD", 400027),
-    (500028, "2023-05-05", "Transaction", "Finish", "80 USD", 400028),
-    (500029, "2023-05-06", "Cash", "Unfinish", "80 USD", 400029),
-    (500030, "2023-05-05", "Transaction", "Unfinish", "90 USD", 400030),
-    (500031, "2023-05-07", "Cash", "Finish", "50 USD", 400031),
+    (500026, "2023-05-02", "Transaction", "Finish", "70 USD", 400026, "Full"),
+    (500027, "2023-05-03", "Cash", "Finish", "80 USD", 400027, "Full"),
+    (500028, "2023-05-05", "Transaction", "Finish", "80 USD", 400028, "Full"),
+    (500029, "2023-05-06", "Cash", "Unfinish", "80 USD", 400029, "Limited"),
+    (500030, "2023-05-05", "Transaction", "Unfinish", "90 USD", 400030, "Limited"),
+    (500031, "2023-05-07", "Cash", "Finish", "50 USD", 400031, "Full"),
 
 -- Sinh viên 2310020 (Courses: 00-10)
-    (500032, "2023-01-02", "Transaction", "Finish", "50 USD", 400032),
-    (500033, "2023-01-02", "Cash", "Finish", "60 USD", 400033),
-    (500034, "2023-01-05", "Transaction", "Finish", "70 USD", 400034),
-    (500035, "2023-02-04", "Cash", "Finish", "70 USD", 400035),
-    (500036, "2023-02-07", "Transaction", "Finish", "80 USD", 400036),
-    (500037, "2023-02-06", "Cash", "Finish", "80 USD", 400037),
-    (500038, "2023-03-08", "Transaction", "Finish", "80 USD", 400038),
-    (500039, "2023-03-09", "Cash", "Finish", "75 USD", 400039),
-    (500040, "2023-03-10", "Transaction", "Finish", "80 USD", 400040),
-    (500041, "2023-04-10", "Cash", "Finish", "90 USD", 400041),
-    (500042, "2023-04-13", "Transaction", "Finish", "90 USD", 400042),
+    (500032, "2023-01-02", "Transaction", "Finish", "50 USD", 400032, "Full"),
+    (500033, "2023-01-02", "Cash", "Finish", "60 USD", 400033, "Full"),
+    (500034, "2023-01-05", "Transaction", "Finish", "70 USD", 400034, "Full"),
+    (500035, "2023-02-04", "Cash", "Finish", "70 USD", 400035, "Full"),
+    (500036, "2023-02-07", "Transaction", "Finish", "80 USD", 400036, "Full"),
+    (500037, "2023-02-06", "Cash", "Finish", "80 USD", 400037, "Full"),
+    (500038, "2023-03-08", "Transaction", "Finish", "80 USD", 400038, "Full"),
+    (500039, "2023-03-09", "Cash", "Finish", "75 USD", 400039, "Full"),
+    (500040, "2023-03-10", "Transaction", "Finish", "80 USD", 400040, "Full"),
+    (500041, "2023-04-10", "Cash", "Finish", "90 USD", 400041, "Full"),
+    (500042, "2023-04-13", "Transaction", "Finish", "90 USD", 400042, "Full"),
 
 -- Sinh viên 2310021 (Courses: 05,07,09,01)
-    (500043, "2023-07-02", "Cash", "Finish", "80 USD", 400043),
-    (500044, "2023-07-03", "Transaction", "Unfinish", "75 USD", 400044),
-    (500045, "2023-07-05", "Cash", "Unfinish", "90 USD", 400045),
-    (500046, "2023-07-05", "Transaction", "Unfinish", "60 USD", 400046),
+    (500043, "2023-07-02", "Cash", "Finish", "80 USD", 400043, "Full"),
+    (500044, "2023-07-03", "Transaction", "Unfinish", "75 USD", 400044, "Limited"),
+    (500045, "2023-07-05", "Cash", "Unfinish", "90 USD", 400045, "Limited"),
+    (500046, "2023-07-05", "Transaction", "Unfinish", "60 USD", 400046, "Limited"),
 
 -- Sinh viên 2310022 (Courses: 01-09)
-    (500047, "2023-02-01", "Cash", "Finish", "60 USD", 400047),
-    (500048, "2023-02-03", "Transaction", "Finish", "70 USD", 400048),
-    (500049, "2023-02-05", "Cash", "Finish", "70 USD", 400049),
-    (500050, "2023-02-05", "Transaction", "Finish", "80 USD", 400050),
-    (500051, "2023-02-07", "Cash", "Finish", "80 USD", 400051),
-    (500052, "2023-03-08", "Transaction", "Unfinish", "80 USD", 400052),
-    (500053, "2023-03-09", "Cash", "Unfinish", "75 USD", 400053),
-    (500054, "2023-03-09", "Transaction", "Unfinish", "80 USD", 400054),
-    (500055, "2023-03-11", "Cash", "Unfinish", "90 USD", 400055),
+    (500047, "2023-02-01", "Cash", "Finish", "60 USD", 400047, "Full"),
+    (500048, "2023-02-03", "Transaction", "Finish", "70 USD", 400048, "Full"),
+    (500049, "2023-02-05", "Cash", "Finish", "70 USD", 400049, "Full"),
+    (500050, "2023-02-05", "Transaction", "Finish", "80 USD", 400050, "Full"),
+    (500051, "2023-02-07", "Cash", "Finish", "80 USD", 400051, "Full"),
+    (500052, "2023-03-08", "Transaction", "Unfinish", "80 USD", 400052, "Limited"),
+    (500053, "2023-03-09", "Cash", "Unfinish", "75 USD", 400053, "Limited"),
+    (500054, "2023-03-09", "Transaction", "Unfinish", "80 USD", 400054, "Limited"),
+    (500055, "2023-03-11", "Cash", "Unfinish", "90 USD", 400055, "Limited"),
 
 -- Sinh viên 2310023 (Courses: 00-10)
-    (500056, "2023-01-22", "Transaction", "Finish", "50 USD", 400056),
-    (500057, "2023-01-22", "Cash", "Unfinish", "60 USD", 400057),
-    (500058, "2023-01-24", "Transaction", "Unfinish", "70 USD", 400058),
-    (500059, "2023-01-26", "Cash", "Unfinish", "70 USD", 400059),
-    (500060, "2023-01-25", "Transaction", "Unfinish", "80 USD", 400060),
-    (500061, "2023-02-26", "Cash", "Unfinish", "80 USD", 400061),
-    (500062, "2023-02-28", "Transaction", "Unfinish", "80 USD", 400062),
-    (500063, "2023-02-28", "Cash", "Unfinish", "75 USD", 400063),
-    (500064, "2023-03-30", "Transaction", "Unfinish", "80 USD", 400064),
-    (500065, "2023-04-01", "Cash", "Unfinish", "90 USD", 400065),
-    (500066, "2023-04-02", "Transaction", "Unfinish", "90 USD", 400066),
+    (500056, "2023-01-22", "Transaction", "Finish", "50 USD", 400056, "Full"),
+    (500057, "2023-01-22", "Cash", "Unfinish", "60 USD", 400057, "Limited"),
+    (500058, "2023-01-24", "Transaction", "Unfinish", "70 USD", 400058, "Limited"),
+    (500059, "2023-01-26", "Cash", "Unfinish", "70 USD", 400059, "Limited"),
+    (500060, "2023-01-25", "Transaction", "Unfinish", "80 USD", 400060, "Limited"),
+    (500061, "2023-02-26", "Cash", "Unfinish", "80 USD", 400061, "Limited"),
+    (500062, "2023-02-28", "Transaction", "Unfinish", "80 USD", 400062, "Limited"),
+    (500063, "2023-02-28", "Cash", "Unfinish", "75 USD", 400063, "Limited"),
+    (500064, "2023-03-30", "Transaction", "Unfinish", "80 USD", 400064, "Limited"),
+    (500065, "2023-04-01", "Cash", "Unfinish", "90 USD", 400065, "Limited"),
+    (500066, "2023-04-02", "Transaction", "Unfinish", "90 USD", 400066, "Limited"),
 
 -- Sinh viên 2310024 (Courses: 02,04,06,08,10,01,03)
-    (500067, "2023-04-02", "Cash", "Finish", "70 USD", 400067),
-    (500068, "2023-04-04", "Transaction", "Finish", "80 USD", 400068),
-    (500069, "2023-04-04", "Cash", "Finish", "80 USD", 400069),
-    (500070, "2023-04-06", "Transaction", "Finish", "80 USD", 400070),
-    (500071, "2023-04-07", "Cash", "Unfinish", "90 USD", 400071),
-    (500072, "2023-04-08", "Transaction", "Unfinish", "60 USD", 400072),
-    (500073, "2023-04-09", "Cash", "Unfinish", "70 USD", 400073),
+    (500067, "2023-04-02", "Cash", "Finish", "70 USD", 400067, "Full"),
+    (500068, "2023-04-04", "Transaction", "Finish", "80 USD", 400068, "Full"),
+    (500069, "2023-04-04", "Cash", "Finish", "80 USD", 400069, "Full"),
+    (500070, "2023-04-06", "Transaction", "Finish", "80 USD", 400070, "Full"),
+    (500071, "2023-04-07", "Cash", "Unfinish", "90 USD", 400071, "Limited"),
+    (500072, "2023-04-08", "Transaction", "Unfinish", "60 USD", 400072, "Limited"),
+    (500073, "2023-04-09", "Cash", "Unfinish", "70 USD", 400073, "Limited"),
 
 -- Sinh viên 2310025 (Courses: 00-09)
-    (500074, "2023-05-10", "Transaction", "Finish", "50 USD", 400074),
-    (500075, "2023-05-12", "Cash", "Finish", "60 USD", 400075),
-    (500076, "2023-05-13", "Transaction", "Finish", "70 USD", 400076),
-    (500077, "2023-05-15", "Cash", "Finish", "70 USD", 400077),
-    (500078, "2023-05-15", "Transaction", "Finish", "80 USD", 400078),
-    (500079, "2023-05-16", "Cash", "Finish", "80 USD", 400079),
-    (500080, "2023-06-18", "Transaction", "Finish", "80 USD", 400080),
-    (500081, "2023-06-19", "Cash", "Finish", "75 USD", 400081),
-    (500082, "2023-06-20", "Transaction", "Finish", "80 USD", 400082),
-    (500083, "2023-06-21", "Cash", "Unfinish", "90 USD", 400083),
+    (500074, "2023-05-10", "Transaction", "Finish", "50 USD", 400074, "Full"),
+    (500075, "2023-05-12", "Cash", "Finish", "60 USD", 400075, "Full"),
+    (500076, "2023-05-13", "Transaction", "Finish", "70 USD", 400076, "Full"),
+    (500077, "2023-05-15", "Cash", "Finish", "70 USD", 400077, "Full"),
+    (500078, "2023-05-15", "Transaction", "Finish", "80 USD", 400078, "Full"),
+    (500079, "2023-05-16", "Cash", "Finish", "80 USD", 400079, "Full"),
+    (500080, "2023-06-18", "Transaction", "Finish", "80 USD", 400080, "Full"),
+    (500081, "2023-06-19", "Cash", "Finish", "75 USD", 400081, "Full"),
+    (500082, "2023-06-20", "Transaction", "Finish", "80 USD", 400082, "Full"),
+    (500083, "2023-06-21", "Cash", "Unfinish", "90 USD", 400083, "Limited"),
 
 -- Sinh viên 2310026 (Courses: 05,06,07)
-    (500084, "2023-08-02", "Transaction", "Unfinish", "80 USD", 400084),
-    (500085, "2023-08-04", "Cash", "Unfinish", "80 USD", 400085),
-    (500086, "2023-08-05", "Transaction", "Unfinish", "75 USD", 400086),
+    (500084, "2023-08-02", "Transaction", "Unfinish", "80 USD", 400084, "Limited"),
+    (500085, "2023-08-04", "Cash", "Unfinish", "80 USD", 400085, "Limited"),
+    (500086, "2023-08-05", "Transaction", "Unfinish", "75 USD", 400086, "Limited"),
 
 -- Sinh viên 2310027 (Courses: 01-08)
-    (500087, "2023-01-16", "Cash", "Finish", "60 USD", 400087),
-    (500088, "2023-01-16", "Transaction", "Finish", "70 USD", 400088),
-    (500089, "2023-01-19", "Cash", "Finish", "70 USD", 400089),
-    (500090, "2023-02-20", "Transaction", "Finish", "80 USD", 400090),
-    (500091, "2023-02-21", "Cash", "Finish", "80 USD", 400091),
-    (500092, "2023-02-22", "Transaction", "Finish", "80 USD", 400092),
-    (500093, "2023-03-21", "Cash", "Finish", "75 USD", 400093),
-    (500094, "2023-03-23", "Transaction", "Unfinish", "80 USD", 400094),
+    (500087, "2023-01-16", "Cash", "Finish", "60 USD", 400087, "Full"),
+    (500088, "2023-01-16", "Transaction", "Finish", "70 USD", 400088, "Full"),
+    (500089, "2023-01-19", "Cash", "Finish", "70 USD", 400089, "Full"),
+    (500090, "2023-02-20", "Transaction", "Finish", "80 USD", 400090, "Full"),
+    (500091, "2023-02-21", "Cash", "Finish", "80 USD", 400091, "Full"),
+    (500092, "2023-02-22", "Transaction", "Finish", "80 USD", 400092, "Full"),
+    (500093, "2023-03-21", "Cash", "Finish", "75 USD", 400093, "Full"),
+    (500094, "2023-03-23", "Transaction", "Unfinish", "80 USD", 400094, "Limited"),
 
 -- Sinh viên 2310028 (Courses: 00,02,04,06,08,01,03,05,07)
-    (500095, "2023-04-05", "Cash", "Finish", "50 USD", 400095),
-    (500096, "2023-04-07", "Transaction", "Finish", "70 USD", 400096),
-    (500097, "2023-04-08", "Cash", "Finish", "80 USD", 400097),
-    (500098, "2023-04-10", "Transaction", "Finish", "80 USD", 400098),
-    (500099, "2023-04-10", "Cash", "Finish", "80 USD", 400099),
-    (500100, "2023-05-12", "Transaction", "Unfinish", "60 USD", 400100),
-    (500101, "2023-05-12", "Cash", "Unfinish", "70 USD", 400101),
-    (500102, "2023-05-14", "Transaction", "Unfinish", "80 USD", 400102),
-    (500103, "2023-05-15", "Cash", "Unfinish", "75 USD", 400103),
+    (500095, "2023-04-05", "Cash", "Finish", "50 USD", 400095, "Full"),
+    (500096, "2023-04-07", "Transaction", "Finish", "70 USD", 400096, "Full"),
+    (500097, "2023-04-08", "Cash", "Finish", "80 USD", 400097, "Full"),
+    (500098, "2023-04-10", "Transaction", "Finish", "80 USD", 400098, "Full"),
+    (500099, "2023-04-10", "Cash", "Finish", "80 USD", 400099, "Full"),
+    (500100, "2023-05-12", "Transaction", "Unfinish", "60 USD", 400100, "Limited"),
+    (500101, "2023-05-12", "Cash", "Unfinish", "70 USD", 400101, "Limited"),
+    (500102, "2023-05-14", "Transaction", "Unfinish", "80 USD", 400102, "Limited"),
+    (500103, "2023-05-15", "Cash", "Unfinish", "75 USD", 400103, "Limited"),
 
 -- Sinh viên 2310029 (Courses: 00-10)
-    (500104, "2023-02-02", "Transaction", "Finish", "50 USD", 400104),
-    (500105, "2023-02-03", "Cash", "Finish", "60 USD", 400105),
-    (500106, "2023-02-05", "Transaction", "Finish", "70 USD", 400106),
-    (500107, "2023-03-05", "Cash", "Finish", "70 USD", 400107),
-    (500108, "2023-03-06", "Transaction", "Finish", "80 USD", 400108),
-    (500109, "2023-03-08", "Cash", "Finish", "80 USD", 400109),
-    (500110, "2023-04-08", "Transaction", "Finish", "80 USD", 400110),
-    (500111, "2023-04-09", "Cash", "Finish", "75 USD", 400111),
-    (500112, "2023-04-11", "Transaction", "Finish", "80 USD", 400112),
-    (500113, "2023-05-12", "Cash", "Finish", "90 USD", 400113),
-    (500114, "2023-05-13", "Transaction", "Finish", "90 USD", 400114),
+    (500104, "2023-02-02", "Transaction", "Finish", "50 USD", 400104, "Full"),
+    (500105, "2023-02-03", "Cash", "Finish", "60 USD", 400105, "Full"),
+    (500106, "2023-02-05", "Transaction", "Finish", "70 USD", 400106, "Full"),
+    (500107, "2023-03-05", "Cash", "Finish", "70 USD", 400107, "Full"),
+    (500108, "2023-03-06", "Transaction", "Finish", "80 USD", 400108, "Full"),
+    (500109, "2023-03-08", "Cash", "Finish", "80 USD", 400109, "Full"),
+    (500110, "2023-04-08", "Transaction", "Finish", "80 USD", 400110, "Full"),
+    (500111, "2023-04-09", "Cash", "Finish", "75 USD", 400111, "Full"),
+    (500112, "2023-04-11", "Transaction", "Finish", "80 USD", 400112, "Full"),
+    (500113, "2023-05-12", "Cash", "Finish", "90 USD", 400113, "Full"),
+    (500114, "2023-05-13", "Transaction", "Finish", "90 USD", 400114, "Full"),
 
 -- Sinh viên 2310030 (Courses: 01,03,05,07,09,00)
-    (500115, "2023-06-01", "Cash", "Finish", "60 USD", 400115),
-    (500116, "2023-06-04", "Transaction", "Finish", "70 USD", 400116),
-    (500117, "2023-06-05", "Cash", "Unfinish", "80 USD", 400117),
-    (500118, "2023-06-05", "Transaction", "Unfinish", "75 USD", 400118),
-    (500119, "2023-06-07", "Cash", "Unfinish", "90 USD", 400119),
-    (500120, "2023-06-08", "Transaction", "Unfinish", "50 USD", 400120),
+    (500115, "2023-06-01", "Cash", "Finish", "60 USD", 400115, "Full"),
+    (500116, "2023-06-04", "Transaction", "Finish", "70 USD", 400116, "Full"),
+    (500117, "2023-06-05", "Cash", "Unfinish", "80 USD", 400117, "Limited"),
+    (500118, "2023-06-05", "Transaction", "Unfinish", "75 USD", 400118, "Limited"),
+    (500119, "2023-06-07", "Cash", "Unfinish", "90 USD", 400119, "Limited"),
+    (500120, "2023-06-08", "Transaction", "Unfinish", "50 USD", 400120, "Limited"),
 
 -- Sinh viên 2310031 (Courses: 02,04,06,08,10,01,03,05,07)
-    (500121, "2023-07-10", "Cash", "Finish", "70 USD", 400121),
-    (500122, "2023-07-12", "Transaction", "Finish", "80 USD", 400122),
-    (500123, "2023-07-13", "Cash", "Finish", "80 USD", 400123),
-    (500124, "2023-07-15", "Transaction", "Finish", "80 USD", 400124),
-    (500125, "2023-07-16", "Cash", "Unfinish", "90 USD", 400125),
-    (500126, "2023-07-17", "Transaction", "Unfinish", "60 USD", 400126),
-    (500127, "2023-07-18", "Cash", "Unfinish", "70 USD", 400127),
-    (500128, "2023-07-18", "Transaction", "Unfinish", "80 USD", 400128),
-    (500129, "2023-07-20", "Cash", "Unfinish", "75 USD", 400129),
+    (500121, "2023-07-10", "Cash", "Finish", "70 USD", 400121, "Full"),
+    (500122, "2023-07-12", "Transaction", "Finish", "80 USD", 400122, "Full"),
+    (500123, "2023-07-13", "Cash", "Finish", "80 USD", 400123, "Full"),
+    (500124, "2023-07-15", "Transaction", "Finish", "80 USD", 400124, "Full"),
+    (500125, "2023-07-16", "Cash", "Unfinish", "90 USD", 400125, "Limited"),
+    (500126, "2023-07-17", "Transaction", "Unfinish", "60 USD", 400126, "Limited"),
+    (500127, "2023-07-18", "Cash", "Unfinish", "70 USD", 400127, "Limited"),
+    (500128, "2023-07-18", "Transaction", "Unfinish", "80 USD", 400128, "Limited"),
+    (500129, "2023-07-20", "Cash", "Unfinish", "75 USD", 400129, "Limited"),
 
 -- Sinh viên 2310032 (Courses: 00-09)
-    (500130, "2023-01-21", "Transaction", "Finish", "50 USD", 400130),
-    (500131, "2023-01-23", "Cash", "Finish", "60 USD", 400131),
-    (500132, "2023-01-25", "Transaction", "Finish", "70 USD", 400132),
-    (500133, "2023-02-25", "Cash", "Finish", "70 USD", 400133),
-    (500134, "2023-02-26", "Transaction", "Finish", "80 USD", 400134),
-    (500135, "2023-02-28", "Cash", "Finish", "80 USD", 400135),
-    (500136, "2023-03-28", "Transaction", "Finish", "80 USD", 400136),
-    (500137, "2023-03-29", "Cash", "Finish", "75 USD", 400137),
-    (500138, "2023-03-30", "Transaction", "Finish", "80 USD", 400138),
-    (500139, "2023-03-31", "Cash", "Finish", "90 USD", 400139),
+    (500130, "2023-01-21", "Transaction", "Finish", "50 USD", 400130, "Full"),
+    (500131, "2023-01-23", "Cash", "Finish", "60 USD", 400131, "Full"),
+    (500132, "2023-01-25", "Transaction", "Finish", "70 USD", 400132, "Full"),
+    (500133, "2023-02-25", "Cash", "Finish", "70 USD", 400133, "Full"),
+    (500134, "2023-02-26", "Transaction", "Finish", "80 USD", 400134, "Full"),
+    (500135, "2023-02-28", "Cash", "Finish", "80 USD", 400135, "Full"),
+    (500136, "2023-03-28", "Transaction", "Finish", "80 USD", 400136, "Full"),
+    (500137, "2023-03-29", "Cash", "Finish", "75 USD", 400137, "Full"),
+    (500138, "2023-03-30", "Transaction", "Finish", "80 USD", 400138, "Full"),
+    (500139, "2023-03-31", "Cash", "Finish", "90 USD", 400139, "Full"),
 
 -- Sinh viên 2310033 (Courses: 05-09)
-    (500140, "2023-08-02", "Transaction", "Finish", "80 USD", 400140),
-    (500141, "2023-08-03", "Cash", "Finish", "80 USD", 400141),
-    (500142, "2023-08-05", "Transaction", "Finish", "75 USD", 400142),
-    (500143, "2023-08-06", "Cash", "Unfinish", "80 USD", 400143),
-    (500144, "2023-08-06", "Transaction", "Unfinish", "90 USD", 400144),
+    (500140, "2023-08-02", "Transaction", "Finish", "80 USD", 400140, "Full"),
+    (500141, "2023-08-03", "Cash", "Finish", "80 USD", 400141, "Full"),
+    (500142, "2023-08-05", "Transaction", "Finish", "75 USD", 400142, "Full"),
+    (500143, "2023-08-06", "Cash", "Unfinish", "80 USD", 400143, "Limited"),
+    (500144, "2023-08-06", "Transaction", "Unfinish", "90 USD", 400144, "Limited"),
 
 -- Sinh viên 2310034 (Courses: 01-10)
-    (500145, "2023-02-11", "Cash", "Finish", "60 USD", 400145),
-    (500146, "2023-02-13", "Transaction", "Finish", "70 USD", 400146),
-    (500147, "2023-02-14", "Cash", "Finish", "70 USD", 400147),
-    (500148, "2023-02-15", "Transaction", "Finish", "80 USD", 400148),
-    (500149, "2023-03-16", "Cash", "Finish", "80 USD", 400149),
-    (500150, "2023-03-17", "Transaction", "Finish", "80 USD", 400150),
-    (500151, "2023-03-18", "Cash", "Finish", "75 USD", 400151),
-    (500152, "2023-04-18", "Transaction", "Finish", "80 USD", 400152),
-    (500153, "2023-04-20", "Cash", "Finish", "90 USD", 400153),
-    (500154, "2023-04-21", "Transaction", "Finish", "90 USD", 400154),
+    (500145, "2023-02-11", "Cash", "Finish", "60 USD", 400145, "Full"),
+    (500146, "2023-02-13", "Transaction", "Finish", "70 USD", 400146, "Full"),
+    (500147, "2023-02-14", "Cash", "Finish", "70 USD", 400147, "Full"),
+    (500148, "2023-02-15", "Transaction", "Finish", "80 USD", 400148, "Full"),
+    (500149, "2023-03-16", "Cash", "Finish", "80 USD", 400149, "Full"),
+    (500150, "2023-03-17", "Transaction", "Finish", "80 USD", 400150, "Full"),
+    (500151, "2023-03-18", "Cash", "Finish", "75 USD", 400151, "Full"),
+    (500152, "2023-04-18", "Transaction", "Finish", "80 USD", 400152, "Full"),
+    (500153, "2023-04-20", "Cash", "Finish", "90 USD", 400153, "Full"),
+    (500154, "2023-04-21", "Transaction", "Finish", "90 USD", 400154, "Full"),
 
 -- Sinh viên 2310035 (Courses: 00,02,04,06,08,10,01,03,05,07,09)
-    (500155, "2023-05-02", "Cash", "Finish", "50 USD", 400155),
-    (500156, "2023-05-04", "Transaction", "Finish", "70 USD", 400156),
-    (500157, "2023-05-05", "Cash", "Unfinish", "80 USD", 400157),
-    (500158, "2023-05-07", "Transaction", "Unfinish", "80 USD", 400158),
-    (500159, "2023-06-06", "Cash", "Unfinish", "80 USD", 400159),
-    (500160, "2023-06-08", "Transaction", "Unfinish", "90 USD", 400160),
-    (500161, "2023-06-08", "Cash", "Unfinish", "60 USD", 400161),
-    (500162, "2023-07-10", "Transaction", "Unfinish", "70 USD", 400162),
-    (500163, "2023-07-11", "Cash", "Unfinish", "80 USD", 400163),
-    (500164, "2023-07-13", "Transaction", "Unfinish", "75 USD", 400164),
-    (500165, "2023-07-13", "Cash", "Unfinish", "90 USD", 400165);
+    (500155, "2023-05-02", "Cash", "Finish", "50 USD", 400155, "Full"),
+    (500156, "2023-05-04", "Transaction", "Finish", "70 USD", 400156, "Full"),
+    (500157, "2023-05-05", "Cash", "Unfinish", "80 USD", 400157, "Limited"),
+    (500158, "2023-05-07", "Transaction", "Unfinish", "80 USD", 400158, "Limited"),
+    (500159, "2023-06-06", "Cash", "Unfinish", "80 USD", 400159, "Limited"),
+    (500160, "2023-06-08", "Transaction", "Unfinish", "90 USD", 400160, "Limited"),
+    (500161, "2023-06-08", "Cash", "Unfinish", "60 USD", 400161, "Limited"),
+    (500162, "2023-07-10", "Transaction", "Unfinish", "70 USD", 400162, "Limited"),
+    (500163, "2023-07-11", "Cash", "Unfinish", "80 USD", 400163, "Limited"),
+    (500164, "2023-07-13", "Transaction", "Unfinish", "75 USD", 400164, "Limited"),
+    (500165, "2023-07-13", "Cash", "Unfinish", "90 USD", 400165, "Limited");
     
 INSERT INTO Certificate (ID, Issue_date, Expire_date, Certificate_name, Enroll_ID)
 VALUES 
@@ -1194,11 +1285,12 @@ VALUES (25000, "How to setup OPNSense?", "I have been setup OPNSense for firewal
        (25004, "How to import data fast?", "I had an assignment on Database System using My SQL, can anyone have ways to import data faster since I have a lot of tables to deal with, like a script or something like that?");
        
 INSERT INTO Reply
-VALUES (250000, "Answer for setup OPNSense", "2023-02-01", 25000),
-       (250001, "Answer for web-block", "2023-05-12", 25001),
-       (250002, "Answer for building a deep learning model", "2023-12-23", 25002),
-       (250003, "Answer for componemt", "2023-11-14", 25003),
-       (250004, "Answer for data importation", "2023-09-19", 25004);
+VALUES 
+    (250000, "Answer for setup OPNSense", "2023-02-01", "2023-02-01 09:00:00", 25000),
+    (250001, "Answer for web-block", "2023-05-12", "2023-05-12 09:01:00", 25001),
+    (250002, "Answer for building a deep learning model", "2023-12-23", "2023-12-23 09:02:00", 25002),
+    (250003, "Answer for componemt", "2023-11-14", "2023-11-14 09:03:00", 25003),
+    (250004, "Answer for data importation", "2023-09-19", "2023-09-19 09:04:00", 25004);
        
 INSERT INTO Post
 VALUES 
@@ -1210,11 +1302,20 @@ VALUES
        
 INSERT INTO Replies
 VALUES 
-    (260000, "Check Network Adaper, check IP, check HTTPS method", "2023-02-03", 25000, 250000),
-	(260001, "Check SSL, check Transparent mode", "2023-05-14", 25001, 250001),
-	(260002, "Learn math like linear algebra, probability and statistic and work on things like convonent layer, functions,... before attending into courses and projects", "2023-12-27", 25002, 250002),
-	(260003, "Group up classes/interfaces that represent the system's work like API, fetch,... and turn them into component - Good Luck, I'm a shitass in this field", "2023-11-15", 25003, 250003),
-	(260004, "If you are dealing with data from csv, excel,...you can use load command rather than insert each row from it", "2023-09-20", 25004, 250004);
+    (260000, "Check Network Adaper, check IP, check HTTPS method", 
+        "2023-02-03", "2023-02-03 09:30:00", 25000, 250000),
+
+    (260001, "Check SSL, check Transparent mode", 
+        "2023-05-14", "2023-05-14 09:31:00", 25001, 250001),
+
+    (260002, "Learn math like linear algebra, probability and statistic and work on things like convonent layer, functions,... before attending into courses and projects", 
+        "2023-12-27", "2023-12-27 09:32:00", 25002, 250002),
+
+    (260003, "Group up classes/interfaces that represent the system's work like API, fetch,... and turn them into component - Good Luck, I'm a shitass in this field", 
+        "2023-11-15", "2023-11-15 09:33:00", 25003, 250003),
+
+    (260004, "If you are dealing with data from csv, excel,...you can use load command rather than insert each row from it", 
+         "2023-09-20", "2023-09-20 09:34:00", 25004, 250004);
     
 INSERT INTO Module
 VALUES 
